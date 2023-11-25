@@ -24,48 +24,54 @@ export class EDAAppStack extends cdk.Stack {
 
     // Integration infrastructure
 
-  const queue = new sqs.Queue(this, "img-created-queue", {
-    receiveMessageWaitTime: cdk.Duration.seconds(10),
-  });
+    const imageProcessQueue = new sqs.Queue(this, "imageProcessQueue", {
+      receiveMessageWaitTime: cdk.Duration.seconds(10),
+    });
 
-  // Lambda functions
+    // Add an SNS topic
+    const newImageTopic = new sns.Topic(this, "NewImageTopic", {
+      displayName: "New Image topic",
+    });
 
-  const processImageFn = new lambdanode.NodejsFunction(
-    this,
-    "ProcessImageFn",
-    {
-      // architecture: lambda.Architecture.ARM_64,
-      runtime: lambda.Runtime.NODEJS_18_X,
-      entry: `${__dirname}/../lambdas/processImage.ts`,
-      timeout: cdk.Duration.seconds(15),
-      memorySize: 128,
-    }
-  );
+    // Change the S3 event notification destination type to SNS
+    imagesBucket.addEventNotification(
+      s3.EventType.OBJECT_CREATED,
+      new s3n.SnsDestination(newImageTopic)
+    );
 
-  // Event triggers
+    // Add a subscriber to the SNS topic
+    newImageTopic.addSubscription(new subs.SqsSubscription(imageProcessQueue));
 
-  imagesBucket.addEventNotification(
-    s3.EventType.OBJECT_CREATED,
-    new s3n.SqsDestination(queue)
-  );
+    // Lambda functions
 
-  const newImageEventSource = new events.SqsEventSource(queue, {
-    batchSize: 5,
-    maxBatchingWindow: cdk.Duration.seconds(10),
-  });
+    const processImageFn = new lambdanode.NodejsFunction(
+      this,
+      "ProcessImageFn",
+      {
+        runtime: lambda.Runtime.NODEJS_18_X,
+        entry: `${__dirname}/../lambdas/processImage.ts`,
+        timeout: cdk.Duration.seconds(15),
+        memorySize: 128,
+      }
+    );
 
-  processImageFn.addEventSource(newImageEventSource);
+    // Event triggers
 
-  // Permissions
+    const newImageEventSource = new events.SqsEventSource(imageProcessQueue, {
+      batchSize: 5,
+      maxBatchingWindow: cdk.Duration.seconds(10),
+    });
 
-  imagesBucket.grantRead(processImageFn);
+    processImageFn.addEventSource(newImageEventSource);
 
-  // Output
-  
-  new cdk.CfnOutput(this, "bucketName", {
-    value: imagesBucket.bucketName,
-  });
+    // Permissions
+
+    imagesBucket.grantRead(processImageFn);
+
+    // Output
+
+    new cdk.CfnOutput(this, "bucketName", {
+      value: imagesBucket.bucketName,
+    });
+  }
 }
-}
-
-
