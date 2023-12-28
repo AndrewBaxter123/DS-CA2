@@ -8,6 +8,7 @@ import * as sqs from "aws-cdk-lib/aws-sqs";
 import * as sns from "aws-cdk-lib/aws-sns";
 import * as subs from "aws-cdk-lib/aws-sns-subscriptions";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 
 import { Construct } from "constructs";
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
@@ -15,6 +16,9 @@ import { Construct } from "constructs";
 export class EDAAppStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
+
+    const dlqTopic = new sns.Topic(this, 'DLQTopic');
+
 
     const imagesBucket = new s3.Bucket(this, "images", {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
@@ -32,6 +36,14 @@ export class EDAAppStack extends cdk.Stack {
       receiveMessageWaitTime: cdk.Duration.seconds(10),
     });
 
+
+//Dead Letter Queue
+const dlq = new sqs.Queue(this, 'DeadLetterQueue', {
+  queueName: 'dead-letter-queue',
+  retentionPeriod: cdk.Duration.days(14),
+});
+
+
     // Add an SNS topic
     const newImageTopic = new sns.Topic(this, "NewImageTopic", {
       displayName: "New Image topic",
@@ -47,19 +59,30 @@ export class EDAAppStack extends cdk.Stack {
     newImageTopic.addSubscription(new subs.SqsSubscription(imageProcessQueue));
     newImageTopic.addSubscription(new subs.SqsSubscription(mailerQ));
 
+        // tables
+
+
+const imageTable = new dynamodb.Table(this, 'ImageTable', {
+  billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+  partitionKey: { name: 'ImageName', 
+  type: dynamodb.AttributeType.STRING },
+  removalPolicy: cdk.RemovalPolicy.DESTROY, 
+  tableName: "Images",
+});
 
     // Lambda functions
 
-    const processImageFn = new lambdanode.NodejsFunction(
-      this,
-      "ProcessImageFn",
-      {
-        runtime: lambda.Runtime.NODEJS_18_X,
-        entry: `${__dirname}/../lambdas/processImage.ts`,
-        timeout: cdk.Duration.seconds(15),
-        memorySize: 128,
-      }
-    );
+    const processImageFn = new lambdanode.NodejsFunction(this, "ProcessImageFn", {
+  runtime: lambda.Runtime.NODEJS_18_X,
+  entry: `${__dirname}/../lambdas/processImage.ts`,
+  timeout: cdk.Duration.seconds(15),
+  memorySize: 128,
+  environment: {
+    DLQ_TOPIC_ARN: dlqTopic.topicArn, 
+    DYNAMODB_TABLE_NAME: imageTable.tableName
+  },
+});
+
 
     const mailerFn = new lambdanode.NodejsFunction(this, "mailer-function", {
       runtime: lambda.Runtime.NODEJS_16_X,
@@ -67,6 +90,15 @@ export class EDAAppStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(3),
       entry: `${__dirname}/../lambdas/mailer.ts`,
     });
+
+    const rejectionMailerFn = new lambdanode.NodejsFunction(this, "-rejection-mailer-function", {
+      runtime: lambda.Runtime.NODEJS_16_X,
+      memorySize: 1024,
+      timeout: cdk.Duration.seconds(3),
+      entry: `${__dirname}/../lambdas/rejectionMailer.ts`,
+    });
+
+
 
     // Event triggers
 
@@ -78,9 +110,15 @@ export class EDAAppStack extends cdk.Stack {
       batchSize: 5,
       maxBatchingWindow: cdk.Duration.seconds(10),
     }); 
+    const deadLetterMailEventSource = new events.SqsEventSource(dlq, {
+      batchSize: 5,
+      maxBatchingWindow: cdk.Duration.seconds(10),
+    }); 
 
     processImageFn.addEventSource(newImageEventSource);
     mailerFn.addEventSource(newImageMailEventSource);
+    rejectionMailerFn.addEventSource(deadLetterMailEventSource);
+
 
     // Permissions
 
@@ -97,6 +135,17 @@ export class EDAAppStack extends cdk.Stack {
         resources: ["*"],
       })
     );
+
+    rejectionMailerFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "ses:SendEmail",
+          "ses:SendRawEmail",
+          "ses:SendTemplatedEmail",
+        ],
+      resources: ['*'],
+    }));
 
     // Output
 
