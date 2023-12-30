@@ -8,24 +8,20 @@ import {
   S3Client,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
-import { DynamoDB } from '@aws-sdk/client-dynamodb';
-import { SNS } from "@aws-sdk/client-sns";
-import { SES_EMAIL_FROM, SES_EMAIL_TO, SES_REGION } from "../env";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { PublishCommand, SNSClient } from "@aws-sdk/client-sns";
 
+const ddbDocClient = createDDbDocClient();
 const s3 = new S3Client();
-const dynamodb = new DynamoDB({ region: SES_REGION });
-const sns = new SNS({ region: SES_REGION });
-const dlqTopicArn = process.env.DLQ_TOPIC_ARN;
-const tableName = 'Images'; 
-
 
 export const handler: SQSHandler = async (event) => {
   console.log("Event ", event);
   for (const record of event.Records) {
-    const recordBody = JSON.parse(record.body);
-    console.log('Raw SNS message ',JSON.stringify(recordBody))
-    if (recordBody.Records) {
-      for (const messageRecord of recordBody.Records) {
+    const recordMessage = JSON.parse(JSON.parse(record.body).Message);
+    console.log('Raw SNS message ', JSON.stringify(recordMessage))
+    if (recordMessage.Records) {
+      for (const messageRecord of recordMessage.Records) {
         const s3e = messageRecord.s3;
         const srcBucket = s3e.bucket.name;
         // Object key may have spaces or unicode non-ASCII characters.
@@ -34,32 +30,44 @@ export const handler: SQSHandler = async (event) => {
         const typeMatch = srcKey.match(/\.([^.]*)$/);
         if (!typeMatch) {
           console.log("Could not determine the image type.");
-          throw new Error("Could not determine the image type. ");
+          const snsClient = new SNSClient({ region: process.env.REGION });
+    	    const publishCommand = new PublishCommand({
+          TopicArn: process.env.REJECTION_TOPIC_ARN,
+          Message: JSON.stringify({ srcKey, reason: 'Unsupported image type' }),
+        });
+        await snsClient.send(publishCommand);
+        return;
         }
         // Check that the image type is supported
         const imageType = typeMatch[1].toLowerCase();
-        if (imageType !== "jpeg" && imageType !== "png") {
+        if (imageType != "jpeg" && imageType != "png") {
           console.log(`Unsupported image type: ${imageType}`);
-          await sns.publish({
-            TopicArn: dlqTopicArn,
-            Message: `Unsupported image type: ${imageType} for file ${srcKey}`,
-          });
-          return;
+          throw new Error("Unsupported image type: ${imageType. ");
         }
-        // write to DynamoDB if supported correctly
-        const dbParams = {
-          TableName: tableName,
+        
+        const putCommand = new PutCommand({
+          TableName: "Images",
           Item: {
-            ImageName: { S: srcKey },
-            Timestamp: { S: new Date().toISOString() },
-            ImageType: { S: imageType },
-            Status: { S: "Processed" },
-            S3Bucket: { S: srcBucket },
-            S3Key: { S: srcKey },
+            ImageName: srcKey,
           },
-        };
-        await dynamodb.putItem(dbParams);
+        });
+
+        await ddbDocClient.send(putCommand);
       }
     }
   }
 };
+
+function createDDbDocClient() {
+  const ddbClient = new DynamoDBClient({ region: process.env.REGION });
+  const marshallOptions = {
+    convertEmptyValues: true,
+    removeUndefinedValues: true,
+    convertClassInstanceToMap: true,
+  };
+  const unmarshallOptions = {
+    wrapNumbers: false,
+  };
+  const translateConfig = { marshallOptions, unmarshallOptions };
+  return DynamoDBDocumentClient.from(ddbClient, translateConfig);
+}
