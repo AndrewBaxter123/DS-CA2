@@ -59,11 +59,22 @@ const dlq = new sqs.Queue(this, 'DeadLetterQueue', {
       displayName: "New Image topic",
     });
 
+    const imageDeletedTopic = new sns.Topic(this, "ImageDeletedTopic", {
+      displayName: "Image Deleted Topic",
+    });
+
     // Change the S3 event notification destination type to SNS
     imagesBucket.addEventNotification(
       s3.EventType.OBJECT_CREATED,
       new s3n.SnsDestination(newImageTopic)
     );
+
+    imagesBucket.addEventNotification(
+      s3.EventType.OBJECT_REMOVED_DELETE,
+      new s3n.SnsDestination(imageDeletedTopic)
+    );
+
+    
 
     // tables
 
@@ -86,6 +97,14 @@ const imageTable = new dynamodb.Table(this, 'ImageTable', {
   deadLetterQueue: dlq
 });
 
+const processDeleteFn = new lambdanode.NodejsFunction(this, "ProcessDeleteFn", {
+  runtime: lambda.Runtime.NODEJS_18_X,
+  entry: `${__dirname}/../lambdas/processDelete.ts`, 
+  timeout: cdk.Duration.seconds(15),
+  memorySize: 128,
+});
+
+
 
     const mailerFn = new lambdanode.NodejsFunction(this, "mailer-function", {
       runtime: lambda.Runtime.NODEJS_18_X,
@@ -107,7 +126,7 @@ const imageTable = new dynamodb.Table(this, 'ImageTable', {
     newImageTopic.addSubscription(new subs.SqsSubscription(mailerQ));
     newImageTopic.addSubscription(new subs.SqsSubscription(dlq));
     newImageTopic.addSubscription(new subs.LambdaSubscription(rejectionMailerFn));
-
+    imageDeletedTopic.addSubscription(new subs.LambdaSubscription(processDeleteFn));
 
 
 
@@ -135,6 +154,8 @@ const imageTable = new dynamodb.Table(this, 'ImageTable', {
 
     imagesBucket.grantRead(processImageFn);
     imageTable.grantReadWriteData(processImageFn);
+    imagesBucket.grantReadWrite(processDeleteFn);
+    imageTable.grantWriteData(processDeleteFn);
 
 
     mailerFn.addToRolePolicy(
