@@ -1,28 +1,32 @@
-import { S3Handler } from "aws-lambda";
+import { S3Handler, SNSEvent } from "aws-lambda";
 import { DeleteCommand, DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 
 const ddbDocClient = createDDBDocClient();
 
-export const handler: S3Handler = async (event) => {
-  console.log("Event: ", event);
+export const handler = async (event: SNSEvent) => {
+    console.log("Received event:", JSON.stringify(event, null, 2));
+  
+    for (const record of event.Records) {
+      try {
 
-  for (const record of event.Records) {
-    const objectKey = decodeURIComponent(record.s3.object.key.replace(/\+/g, " "));
+        const snsMessage = JSON.parse(record.Sns.Message);
+        const s3Record = snsMessage.Records[0];
+        const objectKey = decodeURIComponent(s3Record.s3.object.key.replace(/\+/g, " "));
 
-    try {
-      const deleteCommand = new DeleteCommand({
-        TableName: "Images",
-        Key: { ImageName: objectKey },    // Your DynamoDB table's key attribute
-      });
+        
+        const deleteCommand = new DeleteCommand({
+            TableName: "Images",
+            Key: { ImageName: objectKey },
+        });
 
-      await ddbDocClient.send(deleteCommand);
-      console.log(`Successfully deleted item with key: ${objectKey}`);
+        const result = await ddbDocClient.send(deleteCommand);
+        console.log(`Successfully deleted item with key: ${objectKey}`, result);
     } catch (error) {
-      console.error(`Error deleting item with key: ${objectKey}: `, error);
-      throw error; 
+        console.error(`Error processing record: `, error);
+        throw error; 
+        }
     }
-  }
 };
 
 function createDDBDocClient() {
