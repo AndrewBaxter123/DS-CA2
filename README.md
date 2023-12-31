@@ -18,8 +18,8 @@ __YouTube Demo link__ - ToDo
 
 + Confirmation Mailer - Fully implemented.
 + Rejection Mailer - Fully implemented.
-+ Process Image - Fully implemented
-+ Process Delete - Partially implemented.
++ Process Image - Fully implemented.
++ Process Delete - Fully implemented.
 + Update Table - Not implemented.
 
 ### Phase 3 (if relevant).

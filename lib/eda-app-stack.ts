@@ -120,6 +120,13 @@ const processDeleteFn = new lambdanode.NodejsFunction(this, "ProcessDeleteFn", {
       entry: `${__dirname}/../lambdas/rejectionMailer.ts`,
     });
 
+    const updateTableFn = new lambdanode.NodejsFunction(this, "UpdateTableFn", {
+      runtime: lambda.Runtime.NODEJS_18_X,
+      memorySize: 128,
+      timeout: cdk.Duration.seconds(15),
+      entry: `${__dirname}/../lambdas/updateTable.ts`,  
+    });
+
 
     // Add a subscriber to the SNS topic
     newImageTopic.addSubscription(new subs.SqsSubscription(imageProcessQueue));
@@ -128,6 +135,13 @@ const processDeleteFn = new lambdanode.NodejsFunction(this, "ProcessDeleteFn", {
     newImageTopic.addSubscription(new subs.LambdaSubscription(rejectionMailerFn));
     imageDeletedTopic.addSubscription(new subs.LambdaSubscription(processDeleteFn));
 
+    imageDeletedTopic.addSubscription(new subs.LambdaSubscription(updateTableFn, {
+      filterPolicy: {
+        comment_type: sns.SubscriptionFilter.stringFilter({
+          allowlist: ["Caption"],
+        }),
+      },
+    }));
 
 
     // Event triggers
@@ -156,6 +170,9 @@ const processDeleteFn = new lambdanode.NodejsFunction(this, "ProcessDeleteFn", {
     imageTable.grantReadWriteData(processImageFn);
     imagesBucket.grantReadWrite(processDeleteFn);
     imageTable.grantWriteData(processDeleteFn);
+    imageTable.grantReadWriteData(updateTableFn);
+
+
 
 
     mailerFn.addToRolePolicy(
@@ -185,6 +202,10 @@ const processDeleteFn = new lambdanode.NodejsFunction(this, "ProcessDeleteFn", {
 
     new cdk.CfnOutput(this, "bucketName", {
       value: imagesBucket.bucketName,
+    });
+    
+    new cdk.CfnOutput(this, 'ImageDeletedTopicArn', { //arn:aws doesn't get output so you need to include that in updatecommand too
+      value: imageDeletedTopic.topicArn,
     });
   }
 }
