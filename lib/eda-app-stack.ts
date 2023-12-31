@@ -198,6 +198,32 @@ const processDeleteFn = new lambdanode.NodejsFunction(this, "ProcessDeleteFn", {
       resources: ['*'],
     }));
 
+    processDeleteFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "ses:SendEmail",
+          "ses:SendRawEmail",
+          "ses:SendTemplatedEmail",
+        ],
+        resources: ["*"], 
+      })
+    );
+
+    updateTableFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "ses:SendEmail",
+          "ses:SendRawEmail",
+          "ses:SendTemplatedEmail",
+        ],
+        resources: ["*"], 
+      })
+    );
+    
+    
+
     // Output
 
     new cdk.CfnOutput(this, "bucketName", {
