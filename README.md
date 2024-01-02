@@ -31,19 +31,10 @@ __YouTube Demo link__ - ToDo
 
 ### commands to test.
 
-test 1
-aws s3 cp ./images/sunflower.jpeg  s3://edastack-images9bf4dcd5-scpnrktlnc8t/image1.jpeg
-show email
-aws sns publish --topic-arn "arn:aws:sns:eu-west-1:986377014912:EDAStack-ImageDeletedTopic894C24F6-uKpl7FXFOrly" --message-attributes file://attributes.json --message file://message.json
-show dynamodb with updated caption
-show email
-s3api delete-object --bucket edastack-images9bf4dcd5-scpnrktlnc8t --key image1.jpeg
-show dynamodb table to show its gone
-show email
 
-aws s3 cp ./images/test.gif  s3://edastack-images9bf4dcd5-scpnrktlnc8t/imageGIF.gif
-show email 
-show dynamo to show its not being uploaded there
++ aws s3 cp ./images/sunflower.jpeg  s3://bucketname/image1.jpeg
++ aws sns publish --topic-arn "ARN" --message-attributes file://attributes.json --message file://message.json
++ s3api delete-object --bucket bucketname --key image1.jpeg
 
 
 
